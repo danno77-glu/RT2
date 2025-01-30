@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../supabase';
+import localforage from 'localforage';
 
 export const useAuditForm = () => {
   const navigate = useNavigate();
@@ -20,7 +21,36 @@ export const useAuditForm = () => {
   const [damageRecords, setDamageRecords] = useState([]);
 
   useEffect(() => {
-    console.log("Data received in useAuditForm:", location.state);
+    const initializeForm = async () => {
+      // Load data from local storage if available
+      const storedAuditData = await localforage.getItem('auditData');
+      const storedDamageRecords = await localforage.getItem('damageRecords');
+
+      if (storedAuditData) {
+        setAuditData(storedAuditData);
+      } else {
+        // Initialize reference number only if not loading from local storage
+        await initializeReferenceNumber();
+      }
+
+      if (storedDamageRecords) {
+        setDamageRecords(storedDamageRecords);
+      }
+
+      // Initialize form with scheduled audit data if available
+      if (location.state?.auditData) {
+        const { auditData: initialAuditData } = location.state;
+        console.log("Initial audit data from location state:", initialAuditData);
+        setAuditData(prev => ({
+          ...prev,
+          auditor_name: initialAuditData.auditor_name || '',
+          site_name: initialAuditData.site_name || '',
+          company_name: initialAuditData.company_name || '',
+          audit_date: initialAuditData.audit_date || new Date().toISOString().split('T')[0],
+        }));
+      }
+    };
+
     const initializeReferenceNumber = async () => {
       try {
         const { data, error } = await supabase
@@ -59,22 +89,14 @@ export const useAuditForm = () => {
       }
     };
 
-    // Initialize form with scheduled audit data if available
-    if (location.state?.auditData) {
-      const { auditData: initialAuditData } = location.state;
-      console.log("Initial audit data from location state:", initialAuditData);
-      setAuditData(prev => ({
-        ...prev,
-        auditor_name: initialAuditData.auditor_name || '',
-        site_name: initialAuditData.site_name || '',
-        company_name: initialAuditData.company_name || '',
-        audit_date: initialAuditData.audit_date || new Date().toISOString().split('T')[0],
-      }));
-    }
-
-    // Initialize reference number when form loads
-    initializeReferenceNumber();
+    initializeForm();
   }, [location.state]);
+
+  useEffect(() => {
+    // Store data in local storage whenever it changes
+    localforage.setItem('auditData', auditData);
+    localforage.setItem('damageRecords', damageRecords);
+  }, [auditData, damageRecords]);
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
@@ -127,6 +149,10 @@ export const useAuditForm = () => {
           .delete()
           .eq('id', scheduledAudit.id);
       }
+
+      // Clear local storage after successful submission
+      await localforage.removeItem('auditData');
+      await localforage.removeItem('damageRecords');
 
       navigate('/audits');
     } catch (error) {
